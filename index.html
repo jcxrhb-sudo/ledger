@@ -284,7 +284,7 @@ function getBalance(pid) {
   return p.initial_debt + net;
 }
 
-function getPersons() { return DB.persons.filter(p => p.active !== false); }
+function getPersons() { return DB.persons.filter(p => !p.hidden); }
 
 // ==================== UI工具 ====================
 function $(id) { return document.getElementById(id); }
@@ -709,7 +709,8 @@ function editRecord(rid) {
 // ==================== 人员管理 ====================
 function renderManage() {
   const persons = DB.persons;
-  const activeCount = persons.filter(p => p.active !== false).length;
+  const visibleCount = persons.filter(p => !p.hidden).length;
+  const hiddenCount = persons.filter(p => p.hidden).length;
   const lastExport = getLastExport();
   let exportWarning = '';
   if (lastExport) {
@@ -720,7 +721,7 @@ function renderManage() {
     exportWarning = '<div style="font-size:12px;color:var(--red);margin-bottom:8px;text-align:center;">\u26a0\ufe0f 从未导出过，建议立即导出备份！</div>';
   }
   
-  let html = '<div class="page-header"><h1>\ud83d\udc65 人员管理</h1><div class="subtitle">共 ' + activeCount + ' 个活跃人员</div></div>';
+  let html = '<div class="page-header"><h1>\ud83d\udc65 人员管理</h1><div class="subtitle">共 ' + visibleCount + ' 人' + (hiddenCount > 0 ? '（' + hiddenCount + ' 人已隐藏）' : '') + '</div></div>';
   
   html += '<div class="card">' + exportWarning +
     '<div style="display:flex;gap:8px;">' +
@@ -738,33 +739,54 @@ function renderManage() {
     '<button class="btn btn-primary" onclick="addPerson()">添加</button>' +
   '</div>';
   
-  html += '<div class="card"><div class="card-header"><h2>人员列表</h2><span class="badge">点击改名</span></div>' +
+  // 活跃人员列表
+  html += '<div class="card"><div class="card-header"><h2>人员列表</h2><span class="badge">改名 / 隐藏 / 删除</span></div>' +
     '<ul class="person-list">';
   persons.forEach(p => {
+    if (p.hidden) return;
     const balance = getBalance(p.id);
     const balClass = balance > 0 ? 'ar' : balance < 0 ? 'ag' : 'a0';
-    const activeLabel = p.active === false ? ' [\u5df2\u5220\u9664]' : '';
     html += '<li>' +
       '<div class="pinfo">' +
-        '<div class="pname2">' + p.name + activeLabel + '</div>' +
+        '<div class="pname2">' + p.name + '</div>' +
         '<div class="pdebt">\u521d\u59cb' + fm(p.initial_debt) + ' \u00b7 \u4f59\u989d<span class="' + balClass + '">' + fm(balance) + '</span></div>' +
       '</div>' +
       '<div class="pactions">' +
         '<button onclick="renamePerson(' + p.id + ',\'' + p.name.replace(/'/g, "\\'") + '\')">改名</button>' +
-        (p.active === false
-          ? '<button onclick="togglePerson(' + p.id + ')">\u663e\u793a</button>'
-          : '<button class="danger" onclick="togglePerson(' + p.id + ')">\u5220\u9664</button>') +
+        '<button onclick="hidePerson(' + p.id + ')">隐藏</button>' +
+        '<button class="danger" onclick="deletePerson(' + p.id + ')">删除</button>' +
       '</div>' +
     '</li>';
   });
   html += '</ul></div>';
+  
+  // 隐藏人员列表
+  if (hiddenCount > 0) {
+    html += '<div class="card"><div class="card-header"><h2>\ud83d\udc41\u200d\ud83d\udfe9 已隐藏人员</h2><span class="badge">共 ' + hiddenCount + ' 人</span></div>' +
+      '<ul class="person-list">';
+    persons.forEach(p => {
+      if (!p.hidden) return;
+      const balance = getBalance(p.id);
+      const balClass = balance > 0 ? 'ar' : balance < 0 ? 'ag' : 'a0';
+      html += '<li style="opacity:0.6">' +
+        '<div class="pinfo">' +
+          '<div class="pname2">' + p.name + ' [\u5df2\u9690\u85cf]</div>' +
+          '<div class="pdebt">\u521d\u59cb' + fm(p.initial_debt) + ' \u00b7 \u4f59\u989d<span class="' + balClass + '">' + fm(balance) + '</span></div>' +
+        '</div>' +
+        '<div class="pactions">' +
+          '<button onclick="unhidePerson(' + p.id + ')">显示</button>' +
+        '</div>' +
+      '</li>';
+    });
+    html += '</ul></div>';
+  }
   return html;
 }
 
 function addPerson() {
   const name = document.getElementById('new-name').value.trim();
   if (!name) { showToast('请输入姓名'); return; }
-  if (DB.persons.find(p => p.name === name && p.active !== false)) { showToast('姓名已存在'); return; }
+  if (DB.persons.find(p => p.name === name && !p.hidden)) { showToast('姓名已存在'); return; }
   const debt = parseFloat(document.getElementById('new-debt').value) || 0;
   DB.persons.push({ id: DB.nextPid++, name, initial_debt: debt });
   saveLocal();
@@ -783,20 +805,36 @@ function renamePerson(pid, oldName) {
   navigate('manage');
 }
 
-function togglePerson(pid) {
+function hidePerson(pid) {
   const p = DB.persons.find(x => x.id === pid);
   if (!p) return;
-  if (p.active === false) {
-    if (!confirm('确定恢复 ' + p.name + ' 吗？')) return;
-    p.active = true;
-    saveLocal();
-    showToast('已恢复 ' + p.name);
-  } else {
-    if (!confirm('确定删除 ' + p.name + ' 吗？\n删除后不会出现在列表中，但数据保留。')) return;
-    p.active = false;
-    saveLocal();
-    showToast('已删除 ' + p.name + '，累计总账中将不再显示');
-  }
+  if (!confirm('确定隐藏 ' + p.name + ' 吗？\n隐藏后此人和他的记录都不会显示，但数据保留，可以随时恢复。')) return;
+  p.hidden = true;
+  saveLocal();
+  showToast('已隐藏 ' + p.name);
+  navigate('manage');
+}
+
+function unhidePerson(pid) {
+  const p = DB.persons.find(x => x.id === pid);
+  if (!p) return;
+  if (!confirm('确定恢复显示 ' + p.name + ' 吗？')) return;
+  p.hidden = false;
+  saveLocal();
+  showToast('已恢复 ' + p.name);
+  navigate('manage');
+}
+
+function deletePerson(pid) {
+  const p = DB.persons.find(x => x.id === pid);
+  if (!p) return;
+  if (!confirm('⚠️ 确定彻底删除 ' + p.name + ' 吗？\n\n这将删除此人和他所有的记录，不可恢复！\n建议先导出备份。')) return;
+  // 第二次确认
+  if (!confirm('再次确认：真的要永久删除 ' + p.name + ' 吗？')) return;
+  DB.records = DB.records.filter(r => r.person_id !== pid);
+  DB.persons = DB.persons.filter(x => x.id !== pid);
+  saveLocal();
+  showToast('已彻底删除 ' + p.name);
   navigate('manage');
 }
 
