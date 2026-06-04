@@ -439,7 +439,7 @@ function saveRecord(pid, date, lose, win) {
   const existing = DB.records.find(r => r.person_id === pid && r.date === date);
   if (existing) { existing.lose = lose; existing.win = win; }
   else { DB.records.push({ id: DB.nextRid++, person_id: pid, date, lose, win }); }
-  saveDB();
+  saveLocal();
 }
 
 function saveSingle() {
@@ -652,7 +652,7 @@ function renderPerson(pid) {
 function deleteRecord(rid) {
   if (!confirm('确定删除这条记录吗？')) return;
   DB.records = DB.records.filter(r => r.id !== rid);
-  saveDB();
+  saveLocal();
   showToast('已删除');
   navigate(currentPage);
 }
@@ -694,7 +694,7 @@ function editRecord(rid) {
     rec.person_id = newPid;
     rec.lose = newLose;
     rec.win = newWin;
-    saveDB();
+    saveLocal();
     overlay.remove();
     showToast('已修改');
     navigate(currentPage);
